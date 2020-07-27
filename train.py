@@ -62,8 +62,8 @@ parser.add_argument('--beta', default=0, type=float,
                     help='hyperparameter beta')
 parser.add_argument('--cutmix_prob', default=0, type=float,
                     help='cutmix probability')
-parser.add_argument('--pretrained',  type='store_true',
-                    help='Whether to use pretrained cutmix imagenet model or not')
+parser.add_argument('--pretrained', action='store_true')
+parser.add_argument('--checkpoint', default='/home/rahulahuja/amit/CutMix-PyTorch/pretrained/model_best.pth.tar', type=str, metavar='PATH')
 
 
 parser.set_defaults(bottleneck=True)
@@ -157,7 +157,7 @@ def main():
         raise Exception('unknown dataset: {}'.format(args.dataset))
 
 
-    if pretrained:
+    if args.pretrained:
         num_class_output=1000
     else:
         num_class_output=8142
@@ -173,22 +173,24 @@ def main():
 
     model = torch.nn.DataParallel(model).cuda()
 
-    if pretrained:
-        if os.path.isfile(args.pretrained):
-            print("=> loading checkpoint '{}'".format(args.pretrained))
-            checkpoint = torch.load(args.pretrained)
+    if args.pretrained:
+        if os.path.isfile(args.checkpoint):
+            print("=> loading checkpoint '{}'".format(args.checkpoint))
+            checkpoint = torch.load(args.checkpoint)
             model.load_state_dict(checkpoint['state_dict'])
-            print("=> loaded checkpoint '{}'".format(args.pretrained))
-            num_ftrs = model.fc.in_features
-            model.fc = nn.Linear(num_ftrs, numberofclass)
+            print("=> loaded checkpoint '{}'".format(args.checkpoint))
+            num_ftrs = model.module.fc.in_features
+            model.module.fc = nn.Linear(num_ftrs, numberofclass).cuda()
         else:
-            raise Exception("=> no checkpoint found at '{}'".format(args.pretrained))
+            raise Exception("=> no checkpoint found at '{}'".format(args.checkpoint))
 
-
+    # num_ftrs = model.module.fc.in_features
+    # model.fc = nn.Linear(num_ftrs, numberofclass)
 
     print(model)
+    # print(num_ftrs)
     print('the number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
-
+    # exit()
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
@@ -240,7 +242,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
     end = time.time()
     current_LR = get_learning_rate(optimizer)[0]
-    print("EPOCH:{} ; Current LR: {} ; Time: {}".format(epoch, current_LR, time.time()))
+    print("EPOCH:{} ; Current LR: {} ".format(epoch, current_LR)+ time_string())
     for i, (input, target,_,_) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
@@ -427,6 +429,11 @@ def accuracy(output, target, topk=(1,)):
         res.append(wrong_k.mul_(100.0 / batch_size))
 
     return res
+
+def time_string():
+  ISOTIMEFORMAT='%Y-%m-%d %X'
+  string = '[{}]'.format(time.strftime( ISOTIMEFORMAT, time.gmtime(time.time()) ))
+  return string
 
 
 if __name__ == '__main__':
