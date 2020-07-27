@@ -6,6 +6,7 @@ from torchvision import transforms
 import random
 import numpy as np
 from itertools import islice
+import utils
 
 
 
@@ -82,6 +83,11 @@ class INAT(data.Dataset):
         self.is_train = is_train
         self.loader = default_loader
 
+
+
+
+
+
         # augmentation params
         self.im_size = [224, 224]  # can change this to train on higher res
         self.mu_data = [0.485, 0.456, 0.406]
@@ -90,12 +96,15 @@ class INAT(data.Dataset):
         self.contrast = 0.4
         self.saturation = 0.4
         self.hue = 0.25
+        self.lighting = utils.Lighting(alphastd=0.1, eigval=[0.2175, 0.0188, 0.0045], eigvec=[[-0.5675, 0.7192, 0.4009],[-0.5808, -0.0045, -0.8140],[-0.5836, -0.6948, 0.4203]])
 
         # augmentations
+        self.resize= transforms.Resize(256)
         self.center_crop = transforms.CenterCrop((self.im_size[0], self.im_size[1]))
         self.scale_aug = transforms.RandomResizedCrop(size=self.im_size[0])
         self.flip_aug = transforms.RandomHorizontalFlip()
         self.color_aug = transforms.ColorJitter(self.brightness, self.contrast, self.saturation, self.hue)
+        self.lighting = utils.Lighting(alphastd=0.1, eigval=[0.2175, 0.0188, 0.0045], eigvec=[[-0.5675, 0.7192, 0.4009],[-0.5808, -0.0045, -0.8140],[-0.5836, -0.6948, 0.4203]])
         self.tensor_aug = transforms.ToTensor()
         self.norm_aug = transforms.Normalize(mean=self.mu_data, std=self.std_data)
 
@@ -110,10 +119,14 @@ class INAT(data.Dataset):
             img = self.scale_aug(img)
             img = self.flip_aug(img)
             img = self.color_aug(img)
+            img = self.tensor_aug(img)
+            img= self.lighting(img)
         else:
+            img= self.resize(img)
             img = self.center_crop(img)
+            img = self.tensor_aug(img)
 
-        img = self.tensor_aug(img)
+
         img = self.norm_aug(img)
 
         return img, species_id,im_id, tax_ids

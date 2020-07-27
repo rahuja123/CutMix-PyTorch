@@ -19,6 +19,7 @@ import resnet as RN
 import pyramidnet as PYRM
 import utils
 import numpy as np
+import inatu_loader as inat2018_loader
 
 import warnings
 
@@ -61,6 +62,9 @@ parser.add_argument('--beta', default=0, type=float,
                     help='hyperparameter beta')
 parser.add_argument('--cutmix_prob', default=0, type=float,
                     help='cutmix probability')
+parser.add_argument('--pretrained',  type='store_true',
+                    help='Whether to use pretrained cutmix imagenet model or not')
+
 
 parser.set_defaults(bottleneck=True)
 parser.set_defaults(verbose=True)
@@ -109,53 +113,58 @@ def main():
             raise Exception('unknown dataset: {}'.format(args.dataset))
 
     elif args.dataset == 'imagenet':
-        traindir = os.path.join('/home/data/ILSVRC/train')
-        valdir = os.path.join('/home/data/ILSVRC/val')
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                         std=[0.229, 0.224, 0.225])
+        train_file = os.path.join('/home/rahulahuja/dsta/Temp/rahul/inat2018/train2018.json')
+        val_file= os.path.join('/home/rahulahuja/dsta/Temp/rahul/inat2018/val2018.json')
+        data_target_dir = os.path.join("/home/rahulahuja/dsta/Temp/rahul/inat2018/")
 
-        jittering = utils.ColorJitter(brightness=0.4, contrast=0.4,
-                                      saturation=0.4)
-        lighting = utils.Lighting(alphastd=0.1,
-                                  eigval=[0.2175, 0.0188, 0.0045],
-                                  eigvec=[[-0.5675, 0.7192, 0.4009],
-                                          [-0.5808, -0.0045, -0.8140],
-                                          [-0.5836, -0.6948, 0.4203]])
+        train_data = inat2018_loader.INAT(data_target_dir, train_file, is_train=True)
+        test_data = inat2018_loader.INAT(data_target_dir, val_file, is_train=False)
 
-        train_dataset = datasets.ImageFolder(
-            traindir,
-            transforms.Compose([
-                transforms.RandomResizedCrop(224),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                jittering,
-                lighting,
-                normalize,
-            ]))
-
+        # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+        #                                  std=[0.229, 0.224, 0.225])
+        #
+        # jittering = utils.ColorJitter(brightness=0.4, contrast=0.4,
+        #                               saturation=0.4)
+        # lighting = utils.Lighting(alphastd=0.1,
+        #                           eigval=[0.2175, 0.0188, 0.0045],
+        #                           eigvec=[[-0.5675, 0.7192, 0.4009],
+        #                                   [-0.5808, -0.0045, -0.8140],
+        #                                   [-0.5836, -0.6948, 0.4203]])
+        #
+        # train_dataset = datasets.ImageFolder(
+        #     traindir,
+        #     transforms.Compose([
+        #         transforms.RandomResizedCrop(224),
+        #         transforms.RandomHorizontalFlip(),
+        #         transforms.ToTensor(),
+        #         jittering,
+        #         lighting,
+        #         normalize,
+        #     ]))
+        #
         train_sampler = None
 
         train_loader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+            train_data, batch_size=args.batch_size, shuffle=(train_sampler is None),
             num_workers=args.workers, pin_memory=True, sampler=train_sampler)
 
         val_loader = torch.utils.data.DataLoader(
-            datasets.ImageFolder(valdir, transforms.Compose([
-                transforms.Resize(256),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                normalize,
-            ])),
-            batch_size=args.batch_size, shuffle=False,
-            num_workers=args.workers, pin_memory=True)
-        numberofclass = 1000
+            test_data,batch_size=args.batch_size, shuffle=False, num_workers=args.workers, pin_memory=True)
+
+        numberofclass = 8142
 
     else:
         raise Exception('unknown dataset: {}'.format(args.dataset))
 
+
+    if pretrained:
+        num_class_output=1000
+    else:
+        num_class_output=8142
+
     print("=> creating model '{}'".format(args.net_type))
     if args.net_type == 'resnet':
-        model = RN.ResNet(args.dataset, args.depth, numberofclass, args.bottleneck)  # for ResNet
+        model = RN.ResNet(args.dataset, args.depth, num_class_output, args.bottleneck)  # for ResNet
     elif args.net_type == 'pyramidnet':
         model = PYRM.PyramidNet(args.dataset, args.depth, args.alpha, numberofclass,
                                 args.bottleneck)
@@ -163,6 +172,19 @@ def main():
         raise Exception('unknown network architecture: {}'.format(args.net_type))
 
     model = torch.nn.DataParallel(model).cuda()
+
+    if pretrained:
+        if os.path.isfile(args.pretrained):
+            print("=> loading checkpoint '{}'".format(args.pretrained))
+            checkpoint = torch.load(args.pretrained)
+            model.load_state_dict(checkpoint['state_dict'])
+            print("=> loaded checkpoint '{}'".format(args.pretrained))
+            num_ftrs = model.fc.in_features
+            model.fc = nn.Linear(num_ftrs, numberofclass)
+        else:
+            raise Exception("=> no checkpoint found at '{}'".format(args.pretrained))
+
+
 
     print(model)
     print('the number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
@@ -181,6 +203,7 @@ def main():
         adjust_learning_rate(optimizer, epoch)
 
         # train for one epoch
+
         train_loss = train(train_loader, model, criterion, optimizer, epoch)
 
         # evaluate on validation set
@@ -217,7 +240,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
     end = time.time()
     current_LR = get_learning_rate(optimizer)[0]
-    for i, (input, target) in enumerate(train_loader):
+    print("EPOCH:{} ; Current LR: {} ; Time: {}".format(epoch, current_LR, time.time()))
+    for i, (input, target,_,_) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
 
@@ -305,7 +329,7 @@ def validate(val_loader, model, criterion, epoch):
     model.eval()
 
     end = time.time()
-    for i, (input, target) in enumerate(val_loader):
+    for i, (input, target,_,_) in enumerate(val_loader):
         target = target.cuda()
 
         output = model(input)
