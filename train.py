@@ -19,6 +19,7 @@ import resnet_manifold as RN
 import pyramidnet as PYRM
 import utils
 from utils import *
+from utils import get_img_num_per_cls
 import numpy as np
 import inatu_loader as inat2018_loader
 import random
